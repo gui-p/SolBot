@@ -123,21 +123,12 @@ namespace SolBot.Commands.Play
                 .ExecuteAsync();
 
             Console.WriteLine("Memory size: " + memoryStream.Capacity + " Bytes");
-
-            //_ = Task.Run(async () =>
-            //{
-            //    await Task.Delay(10000);
-            //    _tokenSource.Cancel();
-            //});
             
 
             using (var discord = audioClient.CreatePCMStream(AudioApplication.Mixed))
             try
             {
-                // CancellationToken token = _tokenSource.Token;
-                ValueTask task =  discord.WriteAsync(memoryStream.GetBuffer());
-                //_currentTrack = new(_tokenSource); 
-                await task;
+                await discord.WriteAsync(memoryStream.GetBuffer());
             }
             finally
             {
