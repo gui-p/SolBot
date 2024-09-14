@@ -7,7 +7,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace SolBot
+namespace SolBot.Services
 {
     internal class LogService
     {

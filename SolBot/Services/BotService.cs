@@ -5,21 +5,25 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SolBot.Interfaces;
 using System.Reflection;
+using Microsoft.Extensions.Hosting;
 
-namespace SolBot
+namespace SolBot.Services
 {
-    public class Bot : IBot
+    public sealed class BotService : IHostedService
     {
-        private ServiceProvider? _serviceProvider;
 
-        private readonly DiscordSocketClient _client;
+        private readonly DiscordSocketClient? _client;
         private readonly IConfiguration _configuration;
         private readonly CommandService _commands;
+        private readonly IServiceProvider _serviceProvider;
+        
+        private readonly string _token;
 
-        public Bot(IConfiguration configuration)
+        public BotService(IConfiguration configuration, IServiceProvider serviceProvider)
         {
             _configuration = configuration;
-
+            _serviceProvider = serviceProvider;
+            _token = _configuration["BOT_TOKEN"] ?? throw new Exception("Token not found");
             DiscordSocketConfig clientConfig = new() { GatewayIntents = Discord.GatewayIntents.MessageContent | GatewayIntents.AllUnprivileged};
 
             _client = new DiscordSocketClient(clientConfig);
@@ -27,30 +31,26 @@ namespace SolBot
 
         }
 
-        public async Task StartAsync(ServiceProvider services)
+        public async Task StartAsync(CancellationToken cancellationToken)
         {
-            string discordToken = _configuration["BOT_TOKEN"] ?? throw new Exception("Token not found");
-            _serviceProvider = services;
-
             await _commands.AddModulesAsync(Assembly.GetExecutingAssembly(), _serviceProvider);
-
-            await _client.LoginAsync(TokenType.Bot, discordToken);
+            await _client!.LoginAsync(TokenType.Bot, _token);
             await _client.StartAsync();
 
             _client.MessageReceived += HandleCommandAsync;
             LogService logService = new(_client, _commands);
         }
 
-        public async Task StopAsync()
+        public async Task StopAsync(CancellationToken cancellationToken)
         {
-            if (_client != null)
+            if (_client is not null)
             {
                 await _client.LogoutAsync();
                 await _client.StopAsync();
             }
         }
 
-        public async Task HandleCommandAsync(SocketMessage arg)
+        private async Task HandleCommandAsync(SocketMessage arg)
         {
             if (arg is not SocketUserMessage message || arg.Author.IsBot)
             {
@@ -65,9 +65,8 @@ namespace SolBot
                 await _commands.ExecuteAsync(
                     new SocketCommandContext(_client, message),
                     prefixPos,
-                    _serviceProvider);
-
-                return;
+                    _serviceProvider
+                );
             }
 
         }
