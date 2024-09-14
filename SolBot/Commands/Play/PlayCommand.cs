@@ -1,5 +1,4 @@
 ﻿using CliWrap;
-using CliWrap.Buffered;
 using Discord;
 using Discord.Audio;
 using Discord.Commands;
@@ -7,22 +6,13 @@ using Discord.WebSocket;
 using System.Diagnostics;
 using YoutubeExplode;
 using YoutubeExplode.Videos.Streams;
+using Microsoft.IO;
 
 namespace SolBot.Commands.Play
 {
-
     public class PlayCommand : ModuleBase<SocketCommandContext>
     {
-        //private readonly CancellationTokenSource _tokenSource;
-
-        //private CurrentTrack _currentTrack;
-
-        //public PlayCommand() 
-        //{
-        //    _tokenSource = new CancellationTokenSource();
-        //}
-
-        
+        private static RecyclableMemoryStreamManager _memoryStreamManager = new RecyclableMemoryStreamManager();
 
         [Command("l", RunMode = RunMode.Async, Summary = "Play a video audio from a computer path")]
         public async Task PlayLocal([Remainder] string link)
@@ -36,7 +26,7 @@ namespace SolBot.Commands.Play
             await Play(link, StreamFromYoutube);
         }
 
-        public async Task Play(string link, Func<IAudioClient, string, Task> playFunction)
+        private async Task Play(string link, Func<IAudioClient, string, Task> playFunction)
         {
             if (string.IsNullOrEmpty(link))
             {
@@ -79,43 +69,34 @@ namespace SolBot.Commands.Play
             }) ?? throw new Exception("Null ffmpeg process reference!");
         }
 
-        private Process CreateYTDLPProcess(string path)
-        {
-            return Process.Start(new ProcessStartInfo
-            {
-                FileName = "yt-dlp",
-                Arguments = $"-x --audio-format mp3 {path} -o -",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            }) ?? throw new Exception("Null yt-dlp process reference!");
-        }
-
         private async Task StreamFromLocal(IAudioClient audioClient, string path)
         {
-            using (var ffmpeg = CreateFFmpegProcess(path))
-            using (var output = ffmpeg.StandardOutput.BaseStream)
-            using (var discord = audioClient.CreatePCMStream(AudioApplication.Mixed))
-            {
-                try 
-                {
-                    await output.CopyToAsync(discord); 
-                }
-                finally { await discord.FlushAsync(); }
-            }
+            using var ffmpeg = CreateFFmpegProcess(path);
+            await using var output = ffmpeg.StandardOutput.BaseStream;
+            await using var discord = audioClient.CreatePCMStream(AudioApplication.Mixed);
 
+            try
+            {
+                await output.CopyToAsync(discord);
+            }
+            finally
+            {
+                await discord.FlushAsync();
+            }
         }
 
         private async Task StreamFromYoutube(IAudioClient audioClient, string link)
         {
-            
-            YoutubeClient _youtubeClient = new();
-            StreamManifest streamManifest = await _youtubeClient.Videos.Streams.GetManifestAsync(link);
+
+            YoutubeClient youtubeClient = new();
+            StreamManifest streamManifest = await youtubeClient.Videos.Streams.GetManifestAsync(link);
             IStreamInfo streamInfo = streamManifest.GetAudioOnlyStreams().First();
             Console.WriteLine("Streaming link: " + streamInfo.Url);
-            Stream stream = await _youtubeClient.Videos.Streams.GetAsync(streamInfo);
+            Stream stream = await youtubeClient.Videos.Streams.GetAsync(streamInfo);
 
-            var memoryStream = new MemoryStream();
+            await using var memoryStream = _memoryStreamManager.GetStream();
+            await using var discord = audioClient.CreatePCMStream(AudioApplication.Mixed);
+
             await Cli.Wrap("ffmpeg")
                 .WithArguments(" -hide_banner -loglevel panic -i pipe:0 -ac 2 -f s16le -ar 48000 pipe:1")
                 .WithStandardInputPipe(PipeSource.FromStream(stream))
@@ -123,9 +104,6 @@ namespace SolBot.Commands.Play
                 .ExecuteAsync();
 
             Console.WriteLine("Memory size: " + memoryStream.Capacity + " Bytes");
-            
-
-            using (var discord = audioClient.CreatePCMStream(AudioApplication.Mixed))
             try
             {
                 await discord.WriteAsync(memoryStream.GetBuffer());
@@ -133,21 +111,9 @@ namespace SolBot.Commands.Play
             finally
             {
                 await discord.FlushAsync();
+                await memoryStream.FlushAsync();
+                memoryStream.Capacity = 0;
             }
-        }
-        private struct CurrentTrack
-        {
-            public CurrentTrack(//ValueTask trackTask, 
-                CancellationTokenSource tokenSource)
-            {
-                //_currentTrackTask = trackTask;
-                _tokenSource = tokenSource;
-            }
-
-            //public ValueTask? _currentTrackTask;
-            public CancellationTokenSource _tokenSource;
         }
     }
-
-    
 }
