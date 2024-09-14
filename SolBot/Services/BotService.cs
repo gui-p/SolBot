@@ -2,8 +2,6 @@
 using Discord.Commands;
 using Discord.WebSocket;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using SolBot.Interfaces;
 using System.Reflection;
 using Microsoft.Extensions.Hosting;
 

@@ -6,6 +6,7 @@ namespace SolBot.Interfaces
     {
         Task StreamFromLocal(IAudioClient audioClient, string link);
         Task StreamFromYoutube(IAudioClient audioClient, string link);
+        Task StopPlayingMusic();
     }
 }
 

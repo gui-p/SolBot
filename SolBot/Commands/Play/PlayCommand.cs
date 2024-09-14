@@ -17,10 +17,16 @@ namespace SolBot.Commands.Play
             await Play(link, musicService.StreamFromLocal);
         }
 
-        [Command("p", RunMode = RunMode.Async, Summary = "Play a yotube video audio from a link")]
+        [Command("p", RunMode = RunMode.Async, Summary = "Play a youtube video audio from a link")]
         public async Task PlayYoutube([Remainder] string link)
         {
             await Play(link, musicService.StreamFromYoutube);
+        }
+
+        [Command("s", RunMode = RunMode.Async, Summary = "Stop a music")]
+        public async Task StopPlaying()
+        {
+            await musicService.StopPlayingMusic();
         }
 
         private async Task Play(string link, Func<IAudioClient, string, Task> playFunction)
@@ -46,11 +52,16 @@ namespace SolBot.Commands.Play
                 {
                     await playFunction(audioClient, link);
                 }
+
                 await ReplyAsync(message: $"Disconnected from channel \"{userChannel.Name}\"!");
+            }
+            catch (TaskCanceledException)
+            {
+                await ReplyAsync(message: $"Stopped playing!");
             }
             catch (Exception ex)
             {
-                await ReplyAsync(message: $"An exception occurred: " + ex.Message);
+                await ReplyAsync(message: $"An exception occurred: {ex.Message}");
             }
         }
     }
