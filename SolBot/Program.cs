@@ -27,9 +27,11 @@ namespace SolBot
                 IBot bot = serviceProvider.GetRequiredService<IBot>();
                 await bot.StartAsync(serviceProvider);
                 Console.WriteLine("Connected to discord");
-
+                
+                
                 do
                 {
+                    #if DEBUG
                     ConsoleKeyInfo keyInfo = Console.ReadKey(true);  
 
                     if(keyInfo.Key == ConsoleKey.Q)
@@ -38,10 +40,10 @@ namespace SolBot
                         await bot.StopAsync();
                         break;
                     }
-
+                    #endif
                 }
                 while (true);
-
+                
             }
             catch (Exception ex)
             {
