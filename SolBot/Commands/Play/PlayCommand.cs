@@ -2,36 +2,35 @@
 using Discord.Audio;
 using Discord.Commands;
 using Discord.WebSocket;
-using Microsoft.IO;
+using SolBot.Enums;
 using SolBot.Interfaces;
 
 namespace SolBot.Commands.Play
 {
     public class PlayCommand(IMusicService musicService) : ModuleBase<SocketCommandContext>
     {
-        private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new RecyclableMemoryStreamManager();
 
         [Command("l", RunMode = RunMode.Async, Summary = "Play a video audio from a computer path")]
         public async Task PlayLocal([Remainder] string link)
         {
-            await Play(link, musicService.StreamFromLocal);
+            await Play(StreamFrom.LocalFolder, link);
         }
 
         [Command("p", RunMode = RunMode.Async, Summary = "Play a youtube video audio from a link")]
         public async Task PlayYoutube([Remainder] string link)
         {
-            await Play(link, musicService.StreamFromYoutube);
+            await Play(StreamFrom.Youtube, link);
         }
 
         [Command("s", RunMode = RunMode.Async, Summary = "Stop a music")]
         public async Task StopPlaying()
         {
-            await musicService.StopPlayingMusic();
+            await musicService.Stop();
         }
 
-        private async Task Play(string link, Func<IAudioClient, string, Task> playFunction)
+        private async Task Play(StreamFrom source, string path)
         {
-            if (string.IsNullOrEmpty(link))
+            if (string.IsNullOrEmpty(path))
             {
                 await ReplyAsync(message: "&p <youtube link>");
                 return;
@@ -50,7 +49,7 @@ namespace SolBot.Commands.Play
 
                 using (IAudioClient audioClient = await userChannel.ConnectAsync())
                 {
-                    await playFunction(audioClient, link);
+                    await musicService.Play(source, path,audioClient);
                 }
 
                 await ReplyAsync(message: $"Disconnected from channel \"{userChannel.Name}\"!");

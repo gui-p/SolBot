@@ -5,31 +5,61 @@ using System.Diagnostics;
 using YoutubeExplode;
 using YoutubeExplode.Videos.Streams;
 using Microsoft.IO;
+using SolBot.Enums;
+using YoutubeExplode.Exceptions;
 
 namespace SolBot.Services
 {
-    public sealed class MusicService : IMusicService
+    internal sealed class MusicService : IMusicService
     {
 
         private readonly RecyclableMemoryStreamManager _memoryStreamManager = new ();
         private readonly CancellationTokenSource _cancellationTokenSource = new ();
-        private readonly YoutubeClient _youtubeClient = new (); 
+        private readonly YoutubeClient _youtubeClient = new ();
         
-        private Process CreateFFmpegProcess(string path)
+        
+
+        public async Task Play(StreamFrom source, string path, IAudioClient audioClient)
+        {
+            switch (source)
+            {
+                case StreamFrom.LocalFolder:
+                {
+                    await StreamFromLocal(audioClient, path);
+                    break;
+                }
+                
+                case StreamFrom.Youtube:
+                {
+                    await StreamFromYoutube(audioClient, path);
+                    break;
+                }
+                
+                default: throw new ArgumentException("Invalid source type");
+            }
+        }
+        
+        public async Task Stop()
+        {
+            await _cancellationTokenSource.CancelAsync();
+            _cancellationTokenSource.TryReset();
+        }
+        
+        private static Process CreateFFmpegProcess(string path)
         {
             return Process.Start(new ProcessStartInfo
             {
                 FileName = "ffmpeg",
-                Arguments = $"-hide_banner -loglevel panic -re -i \"{path}\" -ac 2 -f s16le -ar 48000 pipe:1",
+                Arguments = $"-hide_banner -loglevel panic -re -i {path} -ac 2 -f s16le -ar 48000 pipe:1",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true
             }) ?? throw new Exception("Null ffmpeg process reference!");
         }
         
-        public async Task StreamFromLocal(IAudioClient audioClient, string path)
+        private async Task StreamFromLocal(IAudioClient audioClient, string path)
         {
-            using var ffmpeg = CreateFFmpegProcess(path);
+            using var ffmpeg = CreateFFmpegProcess($"\"{path}\"");
             await using var output = ffmpeg.StandardOutput.BaseStream;
             await using var discord = audioClient.CreatePCMStream(AudioApplication.Mixed);
 
@@ -43,7 +73,38 @@ namespace SolBot.Services
             }
         }
 
-        public async Task StreamFromYoutube(IAudioClient audioClient, string link)
+        private async Task StreamFromYoutube(IAudioClient audioClient, string link)
+        {
+
+            bool isPlaylist;
+            
+            try
+            {
+                await _youtubeClient.Playlists.GetAsync(link);
+                isPlaylist = true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex);
+                isPlaylist = false;
+            }
+
+
+            if (isPlaylist)
+            {
+                await foreach (var video in _youtubeClient.Playlists.GetVideosAsync(link))
+                {
+                    await BeginStreamingYoutube(audioClient, video.Url);
+                }
+            }
+            else
+            {
+                await BeginStreamingYoutube(audioClient, link);
+            }
+            
+        }
+
+        private async Task BeginStreamingYoutube(IAudioClient audioClient, string link)
         {
             StreamManifest streamManifest = await _youtubeClient.Videos.Streams.GetManifestAsync(link);
             IStreamInfo streamInfo = streamManifest.GetAudioOnlyStreams().First();
@@ -57,8 +118,8 @@ namespace SolBot.Services
                 .WithArguments(" -hide_banner -loglevel panic -i pipe:0 -ac 2 -f s16le -ar 48000 pipe:1")
                 .WithStandardInputPipe(PipeSource.FromStream(stream))
                 .WithStandardOutputPipe(PipeTarget.ToStream(memoryStream))
-                .ExecuteAsync();
-
+                .ExecuteAsync(); 
+            
             Console.WriteLine("Memory size: " + memoryStream.Capacity + " Bytes");
             try
             {
@@ -71,12 +132,6 @@ namespace SolBot.Services
                 await memoryStream.FlushAsync();
                 memoryStream.Capacity = 0;
             }
-        }
-
-        public async Task StopPlayingMusic()
-        {
-            await _cancellationTokenSource.CancelAsync();
-            _cancellationTokenSource.TryReset();
         }
     }
 }
