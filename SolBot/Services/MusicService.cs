@@ -6,45 +6,43 @@ using YoutubeExplode;
 using YoutubeExplode.Videos.Streams;
 using Microsoft.IO;
 using SolBot.Enums;
-using YoutubeExplode.Exceptions;
+//using YoutubeExplode.Exceptions;
 
 namespace SolBot.Services
 {
     internal sealed class MusicService : IMusicService
     {
 
-        private readonly RecyclableMemoryStreamManager _memoryStreamManager = new ();
-        private readonly CancellationTokenSource _cancellationTokenSource = new ();
-        private readonly YoutubeClient _youtubeClient = new ();
-        
-        
+        private readonly RecyclableMemoryStreamManager _memoryStreamManager = new();
+        private readonly CancellationTokenSource _cancellationTokenSource = new();
+        private readonly YoutubeClient _youtubeClient = new();
 
         public async Task Play(StreamFrom source, string path, IAudioClient audioClient)
         {
             switch (source)
             {
                 case StreamFrom.LocalFolder:
-                {
-                    await StreamFromLocal(audioClient, path);
-                    break;
-                }
-                
+                    {
+                        await StreamFromLocal(audioClient, path);
+                        break;
+                    }
+
                 case StreamFrom.Youtube:
-                {
-                    await StreamFromYoutube(audioClient, path);
-                    break;
-                }
-                
+                    {
+                        await StreamFromYoutube(audioClient, path);
+                        break;
+                    }
+
                 default: throw new ArgumentException("Invalid source type");
             }
         }
-        
+
         public async Task Stop()
         {
             await _cancellationTokenSource.CancelAsync();
             _cancellationTokenSource.TryReset();
         }
-        
+
         private static Process CreateFFmpegProcess(string path)
         {
             return Process.Start(new ProcessStartInfo
@@ -56,7 +54,7 @@ namespace SolBot.Services
                 RedirectStandardError = true
             }) ?? throw new Exception("Null ffmpeg process reference!");
         }
-        
+
         private async Task StreamFromLocal(IAudioClient audioClient, string path)
         {
             using var ffmpeg = CreateFFmpegProcess($"\"{path}\"");
@@ -75,9 +73,9 @@ namespace SolBot.Services
 
         private async Task StreamFromYoutube(IAudioClient audioClient, string link)
         {
-
+            /*
             bool isPlaylist;
-            
+
             try
             {
                 await _youtubeClient.Playlists.GetAsync(link);
@@ -101,7 +99,10 @@ namespace SolBot.Services
             {
                 await BeginStreamingYoutube(audioClient, link);
             }
-            
+            */
+
+            await BeginStreamingYoutube(audioClient, link);
+
         }
 
         private async Task BeginStreamingYoutube(IAudioClient audioClient, string link)
@@ -109,7 +110,7 @@ namespace SolBot.Services
             StreamManifest streamManifest = await _youtubeClient.Videos.Streams.GetManifestAsync(link);
             IStreamInfo streamInfo = streamManifest.GetAudioOnlyStreams().First();
             Console.WriteLine("Streaming link: " + streamInfo.Url);
-            
+
             await using Stream stream = await _youtubeClient.Videos.Streams.GetAsync(streamInfo);
             await using RecyclableMemoryStream memoryStream = _memoryStreamManager.GetStream();
             await using AudioOutStream discord = audioClient.CreatePCMStream(AudioApplication.Mixed);
@@ -118,8 +119,8 @@ namespace SolBot.Services
                 .WithArguments(" -hide_banner -loglevel panic -i pipe:0 -ac 2 -f s16le -ar 48000 pipe:1")
                 .WithStandardInputPipe(PipeSource.FromStream(stream))
                 .WithStandardOutputPipe(PipeTarget.ToStream(memoryStream))
-                .ExecuteAsync(); 
-            
+                .ExecuteAsync();
+
             Console.WriteLine("Memory size: " + memoryStream.Capacity + " Bytes");
             try
             {
