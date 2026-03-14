@@ -16,6 +16,9 @@ namespace SolBot.Services
         private readonly RecyclableMemoryStreamManager _memoryStreamManager = new();
         private readonly CancellationTokenSource _cancellationTokenSource = new();
         private readonly YoutubeClient _youtubeClient = new();
+        
+        private CancellationTokenSource? _playbackCts;
+        private Process? _ffmpeg;
 
         public async Task Play(StreamFrom source, string path, IAudioClient audioClient)
         {
@@ -39,8 +42,23 @@ namespace SolBot.Services
 
         public async Task Stop()
         {
-            await _cancellationTokenSource.CancelAsync();
-            _cancellationTokenSource.TryReset();
+            if (_playbackCts == null)
+                return;
+
+            try
+            {
+                await _playbackCts.CancelAsync();
+            }
+            catch { }
+
+            if (_ffmpeg != null && !_ffmpeg.HasExited)
+            {
+                _ffmpeg.Kill(true);
+                await _ffmpeg.WaitForExitAsync();
+            }
+
+            _playbackCts.Dispose();
+            _playbackCts = null;
         }
 
         private static Process CreateFFmpegProcess(string path)
@@ -73,7 +91,7 @@ namespace SolBot.Services
 
         private async Task StreamFromYoutube(IAudioClient audioClient, string link)
         {
-            /*
+            
             bool isPlaylist;
 
             try
@@ -92,6 +110,7 @@ namespace SolBot.Services
             {
                 await foreach (var video in _youtubeClient.Playlists.GetVideosAsync(link))
                 {
+                    
                     await BeginStreamingYoutube(audioClient, video.Url);
                 }
             }
@@ -99,41 +118,55 @@ namespace SolBot.Services
             {
                 await BeginStreamingYoutube(audioClient, link);
             }
-            */
-
-            await BeginStreamingYoutube(audioClient, link);
+            
+            
+            
+            //await BeginStreamingYoutube(audioClient, link);
 
         }
-
+        
         private async Task BeginStreamingYoutube(IAudioClient audioClient, string link)
         {
-            StreamManifest streamManifest = await _youtubeClient.Videos.Streams.GetManifestAsync(link);
-            IStreamInfo streamInfo = streamManifest.GetAudioOnlyStreams().First();
-            Console.WriteLine("Streaming link: " + streamInfo.Url);
+            _playbackCts = new CancellationTokenSource();
+            var token = _playbackCts.Token;
 
-            await using Stream stream = await _youtubeClient.Videos.Streams.GetAsync(streamInfo);
-            await using RecyclableMemoryStream memoryStream = _memoryStreamManager.GetStream();
+            StreamManifest manifest = await _youtubeClient.Videos.Streams.GetManifestAsync(link);
+            AudioOnlyStreamInfo streamInfo = manifest.GetAudioOnlyStreams().First();
+
+            await using Stream youtubeStream = await _youtubeClient.Videos.Streams.GetAsync(streamInfo);
             await using AudioOutStream discord = audioClient.CreatePCMStream(AudioApplication.Mixed);
 
-            await Cli.Wrap("ffmpeg")
-                .WithArguments(" -hide_banner -loglevel panic -i pipe:0 -ac 2 -f s16le -ar 48000 pipe:1")
-                .WithStandardInputPipe(PipeSource.FromStream(stream))
-                .WithStandardOutputPipe(PipeTarget.ToStream(memoryStream))
-                .ExecuteAsync();
+            _ffmpeg = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "ffmpeg",
+                    Arguments = "-hide_banner -loglevel panic -i pipe:0 -ac 2 -f s16le -ar 48000 pipe:1",
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false
+                }
+            };
 
-            Console.WriteLine("Memory size: " + memoryStream.Capacity + " Bytes");
+            _ffmpeg.Start();
+
+            var ffmpegIn = _ffmpeg.StandardInput.BaseStream;
+            var ffmpegOut = _ffmpeg.StandardOutput.BaseStream;
+
+            var inputTask = youtubeStream.CopyToAsync(ffmpegIn, token);
+            var outputTask = ffmpegOut.CopyToAsync(discord, token);
+
             try
             {
-                await discord.WriteAsync(memoryStream.GetBuffer(), _cancellationTokenSource.Token);
+                await Task.WhenAll(inputTask, outputTask);
             }
+            catch (OperationCanceledException) { }
             finally
             {
-                await stream.FlushAsync();
                 await discord.FlushAsync();
-                await memoryStream.FlushAsync();
-                memoryStream.Capacity = 0;
             }
         }
+        
     }
 }
 
